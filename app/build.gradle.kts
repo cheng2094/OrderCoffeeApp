@@ -57,6 +57,10 @@ dependencies {
     implementation(libs.androidx.lifecycle.runtime.ktx)
     implementation(libs.androidx.activity.compose)
 
+    // ViewModel para Compose 👇
+    implementation(libs.lifecycle.viewmodel.compose)
+    implementation(libs.androidx.compose.ui.geometry)
+
     // Testing
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)

@@ -1,23 +1,5 @@
 package com.example.ordercoffeeapp
 
-/*
- * Copyright 2026 Georgiopoulos Kyriakos
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- */
-
-import android.annotation.SuppressLint
-import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
@@ -57,6 +39,8 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
@@ -73,7 +57,10 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -93,6 +80,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Outline
 import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.PointMode
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.StrokeCap
@@ -107,6 +95,8 @@ import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInWindow
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.Dp
@@ -115,6 +105,7 @@ import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.unit.times
+import androidx.lifecycle.viewmodel.compose.viewModel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlin.math.cos
@@ -147,29 +138,10 @@ data class Ingredient(
     val contentColor: Color = Color(0xFF333333)
 )
 
-/** Represents the user's active configuration of their drink. */
-data class OrderState(
-    val size: CoffeeSize = CoffeeSize.MEDIUM,
-    val ingredients: List<Ingredient> = emptyList()
+data class OptionCategory(
+    val category: IngredientCategory,
+    val options: List<Ingredient>
 )
-
-/**
- * Defines the physics-based drag states for ingredient interaction.
- * Provides granular tracking of an ingredient's origin and current floating point.
- */
-private sealed class DragState {
-    data object None : DragState()
-    data class Dragging(
-        val ingredient: Ingredient,
-        val initialPosition: Offset,
-        val currentPosition: Offset
-    ) : DragState()
-
-    data class Returning(
-        val ingredient: Ingredient,
-        val initialPosition: Offset
-    ) : DragState()
-}
 
 // Data Providers (Mock Database)
 val SugarOptions = listOf(
@@ -186,27 +158,12 @@ val MilkOptions = listOf(
 )
 
 val DrinkOptions = listOf(
-    Ingredient(IngredientCategory.DRINK, "Latte", 0.0, "☕", Color(0xFFF5F5F7), Color(0xFF333333)),
-    Ingredient(IngredientCategory.DRINK, "Cappuccino", 0.50, "☕", Color(0xFFFFF8E1), Color(0xFFF57F17)),
-    Ingredient(IngredientCategory.DRINK, "Espresso", 0.50, "☕", Color(0xFFEFEBE9), Color(0xFF5D4037)),
-    Ingredient(IngredientCategory.DRINK, "Americano", 0.50, "☕", Color(0xFFFAFAFA), Color(0xFF4E342E)),
-    Ingredient(IngredientCategory.DRINK, "Mocha", 0.50, "☕", Color(0xFFFAFAFA), Color(0xFF4E342E)),
-    Ingredient(IngredientCategory.DRINK, "Matcha", 0.50, "🍵", Color(0xFFFAFAFA), Color(0xFF4E342E))
+    Ingredient(IngredientCategory.DRINK, "Americano", 1.10, "☕", Color(0xFFFAFAFA), Color(0xFF4E342E)),
+    Ingredient(IngredientCategory.DRINK, "Espresso", 1.00, "☕", Color(0xFFEFEBE9), Color(0xFF5D4037)),
+    Ingredient(IngredientCategory.DRINK, "Cappuccino", 1.50, "☕", Color(0xFFFFF8E1), Color(0xFFF57F17)),
+    Ingredient(IngredientCategory.DRINK, "Latte", 1.50, "☕", Color(0xFFFFF8E1), Color(0xFF333333)),
+    Ingredient(IngredientCategory.DRINK, "Matcha", 1.50, "🍵", Color(0xFFFAFAFA), Color(0xFF4E342E))
 )
-
-val EspressoOptions = listOf(
-    Ingredient(
-        IngredientCategory.DRINK,
-        "Espresso",
-        1.20,
-        "☕",
-        Color(0xFF3E2723),
-        Color(0xFFD7CCC8)
-    )
-)
-
-val BaseIngredients = listOf(SugarOptions.first(), MilkOptions.first(), DrinkOptions.first())
-
 
 // ==========================================
 // SECTION 2: REUSABLE UI COMPONENTS
@@ -604,7 +561,7 @@ fun ActiveIngredientChip(
                             text = " x",
                             fontSize = 15.sp,
                             fontWeight = FontWeight.ExtraBold,
-                            style = androidx.compose.ui.text.TextStyle(brush = fancyTextBrush),
+                            style = TextStyle(brush = fancyTextBrush),
                             modifier = Modifier.padding(start = 6.dp)
                         )
 
@@ -625,7 +582,7 @@ fun ActiveIngredientChip(
                                 text = "$targetCount",
                                 fontSize = 16.sp,
                                 fontWeight = FontWeight.ExtraBold,
-                                style = androidx.compose.ui.text.TextStyle(brush = fancyTextBrush)
+                                style = TextStyle(brush = fancyTextBrush)
                             )
                         }
                     }
@@ -1230,7 +1187,7 @@ fun MorphingCoffeeCup(
                     .padding(start = 24.dp, end = 24.dp, top = 24.dp, bottom = 32.dp),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                val receiptFont = androidx.compose.ui.text.font.FontFamily.Monospace
+                val receiptFont = FontFamily.Monospace
                 val inkColor = Color(0xFF2B2B2B)
                 val lightInk = Color(0xFF666666)
 
@@ -1281,7 +1238,7 @@ fun MorphingCoffeeCup(
                         lightInk,
                         Offset(0f, 0f),
                         Offset(size.width, 0f),
-                        pathEffect = androidx.compose.ui.graphics.PathEffect.dashPathEffect(
+                        pathEffect = PathEffect.dashPathEffect(
                             floatArrayOf(10f, 10f),
                             0f
                         )
@@ -1358,7 +1315,7 @@ fun MorphingCoffeeCup(
                         lightInk,
                         Offset(0f, 0f),
                         Offset(size.width, 0f),
-                        pathEffect = androidx.compose.ui.graphics.PathEffect.dashPathEffect(
+                        pathEffect = PathEffect.dashPathEffect(
                             floatArrayOf(
                                 10f,
                                 10f
@@ -1486,14 +1443,19 @@ fun MorphingCoffeeCup(
  * Connects the data models to the spatial drag-and-drop mechanics.
  */
 @Composable
-fun CoffeeOrderScreen() {
+fun CoffeeOrderScreen(
+    viewModel: CoffeeOrderViewModel = viewModel()
+) {
     var appState by remember { mutableStateOf(AppState.BREWING) }
     val isBrewing = appState == AppState.BREWING
-
-    var orderState by remember { mutableStateOf(OrderState()) }
-    var dragState by remember { mutableStateOf<DragState>(DragState.None) }
     var cupDropZoneBounds by remember { mutableStateOf(Rect.Zero) }
-    var popoverState by remember { mutableStateOf<IngredientCategory?>(null) }
+
+    val uiState by viewModel.uiState.collectAsState()
+
+    val categories = uiState.baseCategories
+    val orderState = uiState.order
+    val popoverState = uiState.popoverVisibleFor
+    val dragState = uiState.dragState
 
     val activeDraggedIngredient = when (val state = dragState) {
         is DragState.Dragging -> state.ingredient
@@ -1520,7 +1482,7 @@ fun CoffeeOrderScreen() {
         ) {
             AnimatedSizeSelector(
                 selectedSize = orderState.size,
-                onSizeSelected = { orderState = orderState.copy(size = it) }
+                onSizeSelected = { viewModel.setOrderState(orderState.copy(size = it)) }
             )
         }
 
@@ -1537,8 +1499,8 @@ fun CoffeeOrderScreen() {
             exit = fadeOut(tween(200)) + scaleOut(targetScale = 0.8f)
         ) {
             val groupedIngredients = orderState.ingredients.groupingBy { it }.eachCount()
-            @OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
-            androidx.compose.foundation.layout.FlowRow(
+            @OptIn(ExperimentalLayoutApi::class)
+            (FlowRow(
                 horizontalArrangement = Arrangement.spacedBy(4.dp, Alignment.CenterHorizontally),
                 verticalArrangement = Arrangement.spacedBy(0.dp),
                 modifier = Modifier.animateContentSize(
@@ -1549,15 +1511,13 @@ fun CoffeeOrderScreen() {
                 )
             ) {
                 groupedIngredients.forEach { (ingredient, count) ->
-                    androidx.compose.runtime.key(ingredient.displayName) {
+                    key(ingredient) {
                         ActiveIngredientChip(ingredient = ingredient, count = count, onRemove = {
-                            val updatedList = orderState.ingredients.toMutableList()
-                            updatedList.remove(ingredient)
-                            orderState = orderState.copy(ingredients = updatedList)
+                            viewModel.removeIngredient(ingredient)
                         })
                     }
                 }
-            }
+            })
         }
 
         // --- 4. STAGING AREA (CUP / LOADER / RECEIPT) ---
@@ -1587,7 +1547,7 @@ fun CoffeeOrderScreen() {
                 modifier = Modifier
                     .fillMaxSize()
                     .background(Color.Black.copy(alpha = 0.04f))
-                    .pointerInput(Unit) { detectTapGestures(onTap = { popoverState = null }) })
+                    .pointerInput(Unit) { detectTapGestures(onTap = { viewModel.setPopoverState(null) }) })
         }
 
         // --- 6. FLOATING SPATIAL POPOVERS ---
@@ -1598,41 +1558,45 @@ fun CoffeeOrderScreen() {
                 .fillMaxWidth(),
             contentAlignment = Alignment.BottomCenter
         ) {
-            BaseIngredients.forEach { baseIngredient ->
-                val variants = when (baseIngredient.category) {
-                    IngredientCategory.SUGAR -> SugarOptions; IngredientCategory.MILK -> MilkOptions; IngredientCategory.DRINK -> DrinkOptions; else -> emptyList()
-                }
-
+            categories.forEach { category ->
                 SpatialPopover(
-                    isVisible = popoverState == baseIngredient.category,
-                    variants = variants,
+                    isVisible = popoverState == category.category,
+                    category.options,
                     isCheckout = !isBrewing,
                     draggedIngredient = activeDraggedIngredient,
-                    onTap = { variant ->
-                        orderState = orderState.copy(ingredients = orderState.ingredients + variant)
-                        popoverState = null
+                    onTap = { newIngredient ->
+//                        orderState = orderState.copy(ingredients = orderState.ingredients + variant)
+//                        orderState = updateOrder(orderState, newIngredient, viewModel)
+                        viewModel.addOrReplaceIngredient(newIngredient)
+                        viewModel.setPopoverState(null)
                     },
                     onDragStart = { ing, startOffset ->
-                        dragState = DragState.Dragging(ing, startOffset, startOffset)
+                        viewModel.setDragState(DragState.Dragging(ing, startOffset, startOffset))
                     },
                     onDrag = { dragAmount ->
                         if (dragState is DragState.Dragging) {
-                            val current = dragState as DragState.Dragging
-                            dragState =
-                                current.copy(currentPosition = current.currentPosition + dragAmount)
+                            val current = dragState
+                            viewModel.setDragState(
+                                current.copy(
+                                    currentPosition = current.currentPosition + dragAmount
+                                )
+                            )
                         }
                     },
                     onDragEnd = {
                         if (dragState is DragState.Dragging) {
                             val current = dragState as DragState.Dragging
                             if (cupDropZoneBounds.contains(current.currentPosition)) {
-                                orderState =
-                                    orderState.copy(ingredients = orderState.ingredients + current.ingredient)
-                                dragState = DragState.None
-                                popoverState = null
+                                viewModel.addOrReplaceIngredient(current.ingredient)
+                                viewModel.setDragState(DragState.None)
+                                viewModel.setPopoverState(null)
                             } else {
-                                dragState =
-                                    DragState.Returning(current.ingredient, current.initialPosition)
+                                viewModel.setDragState(
+                                    DragState.Returning(
+                                        current.ingredient,
+                                        current.initialPosition
+                                    )
+                                )
                             }
                         }
                     }
@@ -1657,18 +1621,18 @@ fun CoffeeOrderScreen() {
                 horizontalArrangement = Arrangement.SpaceEvenly,
                 verticalAlignment = Alignment.Bottom
             ) {
-                BaseIngredients.forEach { baseIngredient ->
-                    val isPopoverOpen = popoverState == baseIngredient.category
+                categories.forEach { baseCategory ->
+                    val isPopoverOpen = popoverState == baseCategory.category
                     val buttonScale by animateFloatAsState(
                         if (isPopoverOpen) 0.85f else 1f,
                         spring(dampingRatio = 0.6f, stiffness = Spring.StiffnessMedium),
                         label = "buttonScale"
                     )
-                    val dockCategoryName = when (baseIngredient.category) {
+                    val dockCategoryName = when (baseCategory.category) {
                         IngredientCategory.SUGAR -> "Sugar"; IngredientCategory.MILK -> "Milk"; IngredientCategory.DRINK -> "Drinks"
                     }
 
-                    val isBeingDragged = baseIngredient == activeDraggedIngredient
+                    val isBeingDragged = activeDraggedIngredient?.category == baseCategory.category
                     val buttonAlpha by animateFloatAsState(
                         targetValue = if (isBeingDragged) 0f else 1f,
                         animationSpec = if (isBeingDragged) tween(150) else tween(0),
@@ -1681,47 +1645,46 @@ fun CoffeeOrderScreen() {
                             .graphicsLayer { alpha = buttonAlpha }
                     ) {
                         DraggableIngredient(
-                            ingredient = baseIngredient,
+                            ingredient = Ingredient(
+                                displayName = baseCategory.category.name.lowercase(),
+                                category = baseCategory.category,
+                                icon = baseCategory.options.first().icon,
+                                price = baseCategory.options.first().price,
+                                bgColor = baseCategory.options.first().bgColor,
+                                contentColor = baseCategory.options.first().contentColor
+                            ),
                             customLabel = dockCategoryName,
                             sizeDp = 72.dp,
                             isEnabled = isBrewing,
                             isLightText = false,
                             onTap = {
-//                                if (baseIngredient.category == IngredientCategory.DRINK) {
-//                                    orderState =
-//                                        orderState.copy(ingredients = orderState.ingredients + baseIngredient)
-//                                } else {
-                                    popoverState =
-                                        if (popoverState == baseIngredient.category) null else baseIngredient.category
-                                //}
+                                viewModel.setPopoverState(if (popoverState == baseCategory.category) null else baseCategory.category)
                             },
                             onDragStart = { ing, startOffset ->
-                                popoverState = null
-                                dragState = DragState.Dragging(
+                                viewModel.setPopoverState(null)
+                                viewModel.setDragState(DragState.Dragging(
                                     ingredient = ing,
                                     initialPosition = startOffset,
                                     currentPosition = startOffset
-                                )
+                                ))
                             },
                             onDrag = { dragAmount ->
                                 if (dragState is DragState.Dragging) {
-                                    val current = dragState as DragState.Dragging
-                                    dragState =
-                                        current.copy(currentPosition = current.currentPosition + dragAmount)
+                                    val current = dragState
+                                    viewModel.setDragState(current.copy(currentPosition = current.currentPosition + dragAmount))
                                 }
                             },
                             onDragEnd = {
                                 if (dragState is DragState.Dragging) {
-                                    val current = dragState as DragState.Dragging
+                                    val current = dragState
                                     if (cupDropZoneBounds.contains(current.currentPosition)) {
-                                        orderState =
-                                            orderState.copy(ingredients = orderState.ingredients + current.ingredient)
-                                        dragState = DragState.None
+                                        viewModel.addOrReplaceIngredient(current.ingredient)
+                                        viewModel.setDragState(DragState.None)
                                     } else {
-                                        dragState = DragState.Returning(
+                                        viewModel.setDragState(DragState.Returning(
                                             current.ingredient,
                                             current.initialPosition
-                                        )
+                                        ))
                                     }
                                 }
                             }
@@ -1732,9 +1695,7 @@ fun CoffeeOrderScreen() {
         }
 
         // --- 8. CHECKOUT BUTTON ---
-        val currentTotal = remember(orderState) {
-            orderState.size.basePrice + orderState.ingredients.sumOf { it.price }
-        }
+        val currentTotal = orderState.totalPrice
 
         val buttonText = when (appState) {
             AppState.BREWING -> "SWIPE TO PAY • $${String.format("%.2f", currentTotal)}"
@@ -1748,7 +1709,7 @@ fun CoffeeOrderScreen() {
                 when (appState) {
                     AppState.BREWING -> {
                         appState = AppState.PROCESSING
-                        popoverState = null
+                        viewModel.setPopoverState(null)
 
                         coroutineScope.launch {
                             delay(2500)
@@ -1760,7 +1721,7 @@ fun CoffeeOrderScreen() {
                     }
 
                     AppState.RECEIPT -> {
-                        orderState = OrderState()
+                        viewModel.setOrderState(OrderState())
                         appState = AppState.BREWING
                     }
                 }
@@ -1782,7 +1743,7 @@ fun CoffeeOrderScreen() {
 
             val targetPosition = when (val state = dragState) {
                 is DragState.Dragging -> state.currentPosition
-                is DragState.Returning -> state.initialPosition
+                is DragState.Returning -> state.targetPosition
                 else -> Offset.Zero
             }
 
@@ -1796,8 +1757,8 @@ fun CoffeeOrderScreen() {
                 animationSpec = if (isReturning) superSlowReturnSpec else snap(),
                 finishedListener = {
                     if (dragState is DragState.Returning) {
-                        dragState = DragState.None
-                        popoverState = null
+                        viewModel.setDragState(DragState.None)
+                        viewModel.setPopoverState(null)
                     }
                 },
                 label = "dragPosition"
@@ -1912,3 +1873,24 @@ fun PremiumGradientButton(text: String, onClick: () -> Unit, modifier: Modifier 
         )
     }
 }
+
+private fun updateOrder(orderState: OrderState, newIngredient: Ingredient, viewModel: CoffeeOrderViewModel): OrderState {
+    if(newIngredient.category == IngredientCategory.DRINK || newIngredient.category == IngredientCategory.MILK){
+        //reemplazar si existe, si no existe entonces agregue nuevo
+        val updatedList =
+            //Existe en la lista un ingrediente que tenga la misma categoría que el nuevo?
+            if (orderState.ingredients.any { it.category == newIngredient.category }) {
+                //Recorre la lista
+                orderState.ingredients.map { ingredient ->
+                    //Cuando encuentre el ingrediente con la misma categoria lo reemplaza, sino lo deja igual
+                    if (ingredient.category == newIngredient.category) newIngredient else ingredient
+                }
+            } else {
+                orderState.ingredients + newIngredient
+            }
+        return orderState.copy(ingredients = updatedList)
+    }else{
+        return orderState.copy(ingredients = orderState.ingredients + newIngredient)
+    }
+}
+
